@@ -2,7 +2,6 @@
 set -euo pipefail
 
 CONFIG_FILE="$1"
-WSL2_SRC_FOLDER="$2"
 TARGET_FILE="$2"
 BACKUP_FILE="$(dirname "$2")/config-wsl-backup"
 
