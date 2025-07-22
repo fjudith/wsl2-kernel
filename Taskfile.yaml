@@ -1,5 +1,4 @@
 # https://taskfile.dev
-# https://formulenuagique.com/blog/2024/07/11/installer-cilium-sur-wsl2/#etape-5-charger-les-modules-necessaires
 version: "3"
 
 vars:
@@ -28,6 +27,8 @@ tasks:
     cmds:
       - apt update -yqq
       - apt install -yqq {{ .PACKAGES | join " " }}
+      - apt-get autoremove -y --purge
+      - apt-get clean
 
   init:
     desc: Initialize local kernel working directory
@@ -85,7 +86,6 @@ tasks:
   build:kernel:
     desc: Build Kernel
     cmds:
-      - task: prereq
       - task: init
       - task: fetch
       - task: config:client-ip
