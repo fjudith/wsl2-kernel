@@ -10,3 +10,6 @@ RUN apt-get update -yqq \
     && sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d
 
 WORKDIR /root
+
+COPY --chown=root:root patcher.sh ./
+RUN chmod +x ./patcher.sh

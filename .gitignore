@@ -2,3 +2,4 @@
 !.src/.gitkeep
 .output/
 !.output/.gitkeep
+.env

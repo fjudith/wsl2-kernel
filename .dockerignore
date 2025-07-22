@@ -1,0 +1,6 @@
+.output
+.containers
+.env
+.env.example
+Taskfile.yaml
+LICENSE
