@@ -18,6 +18,9 @@ tasks:
         - bc
         - dwarves
         - python3
+        - openssl
+        - cpio
+        - qemu-utils
     cmds:
       - apt update -yqq
       - apt install -yqq {{ .PACKAGES | join " " }}
