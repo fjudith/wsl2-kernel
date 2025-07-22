@@ -146,3 +146,37 @@ tasks:
       - sudo systemctl daemon-reload
       - sudo systemctl restart systemd-modules-load
       - sudo lsmod
+
+  mount:bpffs:
+    desc: Mount BPFfs
+    cmds:
+      - sudo mount bpffs /sys/fs/bpf -t bpf
+
+  mount:cgroup2:
+    desc: Mount Cgroup2
+    cmds:
+      - sudo mount none /sys/fs/cgroup -t cgroup2
+
+  install:bpftool:
+    desc: compile and install bpftool
+    cmds:
+      - git clone --recurse-submodules https://github.com/libbpf/bpftool.git
+      - |
+        cd bpftool/src \
+        && sudo make install
+      - defer: rm -rf bpftool
+
+  fix:mount:
+    desc: Fix required mount point for Cilium
+    cmds:
+      - sudo mount bpffs -t bpf /sys/fs/bpf
+      - sudo mount --make-shared /sys/fs/bpf
+      - sudo mkdir -p /run/cilium/cgroupv2
+      - sudo mount -t cgroup2 none /sys/fs/cgroup
+      - mount --make-shared /sys/fs/cgroup
+      - sudo mount -t cgroup2 none /run/cilium/cgroupv2
+      - sudo mount --make-shared /run/cilium/cgroupv2/
+    status:
+      - findmnt -o PROPAGATION,TARGET /sys/fs/bpf | grep shared
+      - findmnt -o PROPAGATION,TARGET /sys/fs/cgroup | grep shared
+      - findmnt -o PROPAGATION,TARGET /run/cilium/cgroupv2 | grep shared
