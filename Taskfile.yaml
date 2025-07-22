@@ -19,8 +19,8 @@ tasks:
         - dwarves
         - python3
     cmds:
-      - sudo apt update -yqq
-      - sudo apt install -yqq {{ .PACKAGES | join " " }}
+      - apt update -yqq
+      - apt install -yqq {{ .PACKAGES | join " " }}
 
   init:
     desc: Initialize local kernel working directory
@@ -108,7 +108,7 @@ tasks:
       - grep 'CONFIG_INET_XFRM_MODE_TUNNEL=m' .src/Microsoft/config-wsl
       - grep 'CONFIG_XFRM_OFFLOAD=y' .src/Microsoft/config-wsl
 
-  build:
+  build:kernel:
     desc: Build Kernel
     cmds:
       - task: prereq
@@ -123,3 +123,21 @@ tasks:
       - cp -r .src .output
     status:
       - cmp .src/Microsoft/config-wsl .output/Microsoft/config-wsl
+
+  build:
+    desc: Build Kernel using container
+    vars:
+      IMAGE_NAME: oci.local/amd64/ubuntu:24.04-builder
+    cmds:
+      - >
+        docker image build
+        -t {{.IMAGE_NAME}}
+        containers/builder
+      - >
+        docker container run --rm -it
+        --name wsl2-kernel-builder
+        -v $PWD/.output/:/output/
+        -v $PWD/Taskfile.yaml:/Taskfile.yaml
+        {{.IMAGE_NAME}}
+        bash -c "task build:kernel"
+      - defer: docker image rm {{.IMAGE_NAME}}
