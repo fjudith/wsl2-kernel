@@ -1,0 +1,125 @@
+version: "3"
+
+vars:
+  SEMVER_MINOR: 6.6
+  SEMVER: 6.6.87.2
+
+tasks:
+  prereq:
+    desc: Install required OS dependencies
+    vars:
+      PACKAGES:
+        - git
+        - build-essential
+        - flex
+        - bison
+        - libssl-dev
+        - libelf-dev
+        - bc
+        - dwarves
+        - python3
+    cmds:
+      - sudo apt update -yqq
+      - sudo apt install -yqq {{ .PACKAGES | join " " }}
+
+  init:
+    desc: Initialize local kernel working directory
+    vars:
+      KERNEL_SOURCE_PATH: .src
+    cmds:
+      - mkdir -p {{.KERNEL_SOURCE_PATH}}/
+      - git -C {{.KERNEL_SOURCE_PATH}}/ init
+      - git -C {{.KERNEL_SOURCE_PATH}}/ remote add origin https://github.com/microsoft/WSL2-Linux-Kernel.git
+    status:
+      - test -d {{.KERNEL_SOURCE_PATH}}/
+      - git -C {{.KERNEL_SOURCE_PATH}}/ remote -v | grep 'WSL2-Linux-Kernel'
+
+  download:
+    desc: Retrieve WL2 kernel sources
+    dir: .src/
+    cmds:
+      - git config --local gc.auto 0
+      - >
+        git -c protocol.version=2 fetch
+        --no-tags
+        --prune
+        --progress
+        --no-recurse-submodules
+        --depth=1 origin
+        linux-msft-wsl-{{.SEMVER}}:refs/remotes/origin/build/linux-msft-wsl-{{.SEMVER_MINOR}}.y
+      - >
+        git checkout --progress --force
+        -B build/linux-msft-wsl-{{.SEMVER_MINOR}}.y
+        refs/remotes/origin/build/linux-msft-wsl-{{.SEMVER_MINOR}}.y
+    status:
+      - git -C .src/  branch --list | grep build/linux-msft-wsl-{{.SEMVER_MINOR}}.y
+
+  config:client-ip:
+    desc: Enable Client IP load-balancing affinity
+    dir: .src/
+    cmds:
+      - |
+        sed -i \
+        's/# CONFIG_NETFILTER_XT_MATCH_RECENT is not set/CONFIG_NETFILTER_XT_MATCH_RECENT=y/' \
+        Microsoft/config-wsl
+    status:
+      - grep 'CONFIG_NETFILTER_XT_MATCH_RECENT=y' .src/Microsoft/config-wsl
+
+  config:cilium:
+    desc: Enable Cilium required kernel modules
+    dir: .src/
+    cmds:
+      - |
+        sed \
+        -e 's/CONFIG_CRYPTO_AEAD=y/CONFIG_CRYPTO_AEAD=m/' \
+        -e 's/CONFIG_CRYPTO_AEAD2=y/CONFIG_CRYPTO_AEAD2=m/' \
+        -e 's/CONFIG_CRYPTO_AES=y/CONFIG_CRYPTO_AES=m/' \
+        -e 's/CONFIG_CRYPTO_CBC=y/CONFIG_CRYPTO_CBC=m/' \
+        -e 's/CONFIG_CRYPTO_GCM=y/CONFIG_CRYPTO_GCM=m/' \
+        -e 's/CONFIG_CRYPTO_HMAC=y/CONFIG_CRYPTO_HMAC=m/' \
+        -e 's/CONFIG_CRYPTO_SEQIV=y/CONFIG_CRYPTO_SEQIV=m/' \
+        -e 's/CONFIG_CRYPTO_SHA256=y/CONFIG_CRYPTO_SHA256=m/' \
+        -e 's/CONFIG_INET_ESP=y/CONFIG_INET_ESP=m/' \
+        -e 's/# CONFIG_INET_IPCOMP is not set/CONFIG_INET_IPCOMP=m/' \
+        -e 's/# CONFIG_INET_XFRM_TUNNEL is not set/CONFIG_INET_XFRM_TUNNEL=m/' \
+        -e 's/# CONFIG_INET6_ESP is not set/CONFIG_INET6_ESP=m/' \
+        -e 's/# CONFIG_INET6_IPCOMP is not set/CONFIG_INET6_IPCOMP=m/' \
+        -e 's/CONFIG_IP_SET_HASH_IP=y/CONFIG_IP_SET_HASH_IP=m/' \
+        -e 's/CONFIG_IP_SET=y/CONFIG_IP_SET=m/' \
+        -e 's/# CONFIG_NET_SCH_FQ is not set/CONFIG_NET_SCH_FQ=m/' \
+        -e 's/# CONFIG_NETFILTER_XT_MATCH_MARK is not set/CONFIG_NETFILTER_XT_MATCH_MARK=y/' \
+        -e 's/# CONFIG_NETFILTER_XT_MATCH_SOCKET is not set/CONFIG_NETFILTER_XT_MATCH_SOCKET=y/' \
+        -e 's/CONFIG_NETFILTER_XT_SET=y/CONFIG_NETFILTER_XT_SET=m/' \
+        -e 's/# CONFIG_NETFILTER_XT_TARGET_TPROXY is not set/CONFIG_NETFILTER_XT_TARGET_TPROXY=m/' \
+        -e 's/CONFIG_XFRM_ALGO=y/CONFIG_XFRM_ALGO=m/' \
+        -e 's/# CONFIG_XFRM_STATISTICS is not set/CONFIG_XFRM_STATISTICS=y/' \
+        -e 's/CONFIG_XFRM_USER=y/CONFIG_XFRM_USER=m/' \
+        -i Microsoft/config-wsl
+      - |
+        cat << EOF | tee -a Microsoft/config-wsl
+        CONFIG_INET_XFRM_MODE_TUNNEL=m
+        CONFIG_INET6_TUNNEL=m
+        CONFIG_INET6_XFRM_TUNNEL=m
+        CONFIG_XFRM_OFFLOAD=y
+        EOF
+    status:
+      - grep 'CONFIG_CRYPTO_AEAD=m' .src/Microsoft/config-wsl
+      - grep 'CONFIG_XFRM_USER=m' .src/Microsoft/config-wsl
+      - grep 'CONFIG_INET_XFRM_MODE_TUNNEL=m' .src/Microsoft/config-wsl
+      - grep 'CONFIG_XFRM_OFFLOAD=y' .src/Microsoft/config-wsl
+
+  build:
+    desc: Build Kernel
+    cmds:
+      - task: prereq
+      - task: init
+      - task: download
+      - task: config:client-ip
+      - task: config:cilium
+      - |
+        cd .src/
+        echo -ne '\n' | make -j$(nproc) KCONFIG_CONFIG=Microsoft/config-wsl
+      - rm -rf .src/.git
+      - cp -r .src .output
+    status:
+      - cmp .src/Microsoft/config-wsl .output/Microsoft/config-wsl
