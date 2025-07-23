@@ -164,7 +164,7 @@ tasks:
       - findmnt -o PROPAGATION,TARGET /sys/fs/cgroup | grep shared
       - findmnt -o PROPAGATION,TARGET /run/cilium/cgroupv2 | grep shared
 
-  install:bpftool:
+  build:bpftool:
     desc: compile and install bpftool
     cmds:
       - git clone --recurse-submodules https://github.com/libbpf/bpftool.git
@@ -173,13 +173,12 @@ tasks:
         && sudo make install
       - defer: rm -rf bpftool
 
-  fix:mount:
+  mount:
     desc: Fix required mount point for Cilium
     cmds:
       - sudo chown -R root:root /opt/cni/bin
       - task: mount:bpffs
       - task: mount:cgroup2
-
 
   install:k3s:
     desc: Install K3S
