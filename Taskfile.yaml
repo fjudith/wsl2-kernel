@@ -151,11 +151,18 @@ tasks:
     desc: Mount BPFfs
     cmds:
       - sudo mount bpffs /sys/fs/bpf -t bpf
+    status:
+      - findmnt -o PROPAGATION,TARGET /sys/fs/bpf | grep shared
 
   mount:cgroup2:
     desc: Mount Cgroup2
     cmds:
-      - sudo mount none /sys/fs/cgroup -t cgroup2
+      - sudo mkdir -p /run/cilium/cgroupv2
+      - sudo mount -t cgroup2 none /run/cilium/cgroupv2
+      - sudo mount --make-shared /run/cilium/cgroupv2/
+    status:
+      - findmnt -o PROPAGATION,TARGET /sys/fs/cgroup | grep shared
+      - findmnt -o PROPAGATION,TARGET /run/cilium/cgroupv2 | grep shared
 
   install:bpftool:
     desc: compile and install bpftool
@@ -169,14 +176,84 @@ tasks:
   fix:mount:
     desc: Fix required mount point for Cilium
     cmds:
-      - sudo mount bpffs -t bpf /sys/fs/bpf
-      - sudo mount --make-shared /sys/fs/bpf
-      - sudo mkdir -p /run/cilium/cgroupv2
-      - sudo mount -t cgroup2 none /sys/fs/cgroup
-      - mount --make-shared /sys/fs/cgroup
-      - sudo mount -t cgroup2 none /run/cilium/cgroupv2
-      - sudo mount --make-shared /run/cilium/cgroupv2/
-    status:
-      - findmnt -o PROPAGATION,TARGET /sys/fs/bpf | grep shared
-      - findmnt -o PROPAGATION,TARGET /sys/fs/cgroup | grep shared
-      - findmnt -o PROPAGATION,TARGET /run/cilium/cgroupv2 | grep shared
+      - sudo chown -R root:root /opt/cni/bin
+      - task: mount:bpffs
+      - task: mount:cgroup2
+
+
+  install:k3s:
+    desc: Install K3S
+    summary: >
+      Traefik as it conflicts with the LoadBalancer service controller
+    vars:
+      K3S_ARGS:
+        - --disable=traefik
+        - --disable=serviceldb
+        - --flannel-backend=none
+        - --disable-network-policy
+    cmds:
+      - task: fix:mount
+      - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server {{ .K3S_ARGS | join " " }}' sh -s -
+      - task: kubeconfig:k3s
+
+  kubeconfig:k3s:
+    desc: Merge K3s context in user's local client configuration
+    env:
+      KUBECONFIG:
+        sh: echo "${HOME}/.kube/config:${HOME}/.kube/k3s-config"
+
+    cmds:
+      - cp ${HOME}/.kube/config ${HOME}/.kube/config.backup
+      - sudo cat /etc/rancher/k3s/k3s.yaml > ${HOME}/.kube/k3s-config
+      - kubectl config view --flatten > ${HOME}/.kube/merged-kubeconfig
+      - mv ${HOME}/.kube/merged-kubeconfig ${HOME}/.kube/config
+
+  update:
+    desc: Build and update kernel image
+    cmds:
+      - rm -rf .output/.src/
+      - task: build
+      - task: install
+      - task: post-install
+
+  install:kind:
+    desc: Install Kubernetes in Docker (KinD)
+    vars:
+      VERSION: 0.29.0
+    cmds:
+      - mkdir -p ./bin
+      - >
+        [ $(uname -m) = x86_64 ] && curl -Lo $HOME/.local/bin/kind
+        https://kind.sigs.k8s.io/dl/v{{.VERSION}}/kind-linux-amd64
+      - chmod +x $HOME/.local/bin/kind
+      - |
+        cat <<EOF | tee .bin/kind-config.yaml
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+          - role: control-plane
+          - role: worker
+          - role: worker
+        networking:
+          disableDefaultCNI: true
+        EOF
+      - kind create cluster --config=.bin/kind-config.yaml
+    generates:
+      - .bin/kind-config.yaml
+
+  install:cilium:
+    desc: install cilium
+    vars:
+      VERSION: 1.17.5
+      NETWORK_CIDR: 10.96.0.0/16
+    cmds:
+      - cat <<EOF | sudo tee /etc/sysctl.d/10-kind.conf
+        fs.inotify.max_user_watches = 524288
+        fs.inotify.max_user_instances = 512
+        EOF
+      - sudo sysctl -p
+      - >
+        cilium install
+        --version {{.VERSION}}
+        --helm-set=securityContext.privileged=true
+        --set=ipam.operator.clusterPoolIPv4PodCIDRList="{{.NETWORK_CIDR}}"
